@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <!-- iPhone 15等のダイナミックアイランド・ノッチ領域のタップ不具合を防ぐセーフエリア設定 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Custom Tier Maker & Albums</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TierMaker">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <!-- タッチデバイス対応のドラッグ＆ドロップライブラリ (SortableJS) -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #121212;
+      --card: #1e1e1e;
+      --card-hover: #2a2a2a;
+      --accent: #007aff;
+      --accent-danger: #ff3b30;
+      --accent-success: #34c759;
+      --text: #ffffff;
+      --text-sub: #aaa;
+      --border: #2c2c2e;
+      /* iPhone 15等の Safe Area インセット変数 */
+      --sat: env(safe-area-inset-top, 20px);
+      --sab: env(safe-area-inset-bottom, 20px);
+      --sal: env(safe-area-inset-left, 0px);
+      --sar: env(safe-area-inset-right, 0px);
+    }
+    * { box-sizing: border-box; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    
+    body {
+      margin: 0;
+      /* iPhone 15画面上部（Dynamic Island）と重なってタップ不能になるのを防ぐ領域確保 */
+      padding-top: calc(var(--sat) + 10px);
+      padding-bottom: calc(var(--sab) + 40px);
+      padding-left: calc(var(--sal) + 12px);
+      padding-right: calc(var(--sar) + 12px);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: var(--bg); color: var(--text); -webkit-user-select: none; user-select: none;
+      min-height: 100vh;
+    }
+
+    /* 上部ヘッダー */
+    .header-controls {
+      display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;
+    }
+    select, button, input[type="text"] {
+      background: var(--card); color: var(--text); border: 1px solid var(--border);
+      padding: 10px 12px; border-radius: 8px; font-size: 0.9rem; outline: none;
+    }
+    select { flex: 1; min-width: 140px; }
+    button {
+      background: var(--accent); border: none; font-weight: 600; cursor: pointer; white-space: nowrap;
+      transition: opacity 0.1s; color: var(--text);
+    }
+    button:active { opacity: 0.8; }
+    button.btn-sec { background: #3a3a3c; }
+    button.btn-success { background: var(--accent-success); }
+
+    /* モード切り替えタブ */
+    .nav-tabs {
+      display: flex; gap: 4px; background: #1c1c1e; padding: 4px; border-radius: 10px; margin-bottom: 12px;
+    }
+    .nav-tab {
+      flex: 1; text-align: center; padding: 8px 0; font-size: 0.8rem; font-weight: 600;
+      border-radius: 7px; color: var(--text-sub); cursor: pointer;
+    }
+    .nav-tab.active { background: #2c2c2e; color: var(--text); }
+
+    /* セクション切り替え */
+    .view-section { display: none; }
+    .view-section.active { display: block; }
+
+    /* アイテム追加フォーム & 設定カード */
+    .add-form, .settings-card {
+      background: var(--card); padding: 12px; border-radius: 10px; margin-bottom: 12px;
+      display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border);
+    }
+    .form-row { display: flex; gap: 8px; }
+    .file-label {
+      background: #2c2c2e; padding: 10px; border-radius: 8px; font-size: 0.85rem;
+      cursor: pointer; text-align: center; white-space: nowrap; border: 1px solid var(--border);
+    }
+    #file-input, #batch-file-input, #backup-file-input { display: none; }
+
+    /* Tier設定エリア */
+    .tier-setting-row {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    }
+    .color-picker {
+      width: 32px; height: 32px; border-radius: 6px; border: none; cursor: pointer; background: none;
+    }
+
+    /* Tierボード */
+    .tier-board { display: flex; flex-direction: column; gap: 8px; }
+    .tier-row {
+      display: flex; min-height: 80px; background: var(--card); border-radius: 8px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .tier-label {
+      width: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      font-weight: 700; color: #000; flex-shrink: 0; padding: 4px; text-align: center; line-height: 1.1;
+      font-size: 0.95rem; word-break: break-word;
+    }
+    .tier-items {
+      flex-grow: 1; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; align-content: flex-start;
+      min-height: 80px;
+    }
+
+    /* Tier内のアイテムカード */
+    .item-card {
+      background: #2a2a2c; border-radius: 6px; padding: 4px; width: 72px; text-align: center;
+      display: flex; flex-direction: column; align-items: center; position: relative; cursor: grab;
+      border: 1px solid transparent; transition: border-color 0.2s, transform 0.1s;
+      touch-action: none; /* SortableJSのドラッグ動作安定化 */
+    }
+    .item-card:active { transform: scale(0.96); }
+    .item-card img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; background: #3a3a3c; pointer-events: none; }
+    .item-card .title {
+      font-size: 0.7rem; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;
+    }
+    .item-card .album-badge {
+      position: absolute; top: 2px; right: 2px; background: rgba(0, 122, 255, 0.9);
+      color: white; font-size: 0.6rem; font-weight: bold; padding: 1px 4px; border-radius: 8px;
+    }
+
+    /* A/B比較エリア */
+    .compare-container {
+      background: var(--card); padding: 16px; border-radius: 12px; text-align: center; margin-bottom: 16px;
+      border: 1px solid var(--border);
+    }
+    .compare-box { display: flex; gap: 12px; justify-content: center; margin-top: 12px; }
+    .card-choice {
+      flex: 1; background: #2a2a2c; border-radius: 10px; padding: 12px;
+      display: flex; flex-direction: column; align-items: center; cursor: pointer;
+      border: 2px solid transparent; transition: all 0.2s;
+    }
+    .card-choice:active { border-color: var(--accent); transform: scale(0.98); }
+    .card-choice img { width: 100px; height: 100px; object-fit: cover; border-radius: 8px; margin-bottom: 8px; background: #3a3a3c; }
+    .card-choice .item-title { font-weight: 700; font-size: 0.95rem; word-break: break-all; }
+
+    /* モーダル表示（アルバム・詳細） */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85);
+      display: none; justify-content: center; align-items: flex-end; z-index: 1000; backdrop-filter: blur(8px);
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-content {
+      background: #1c1c1e; width: 100%; max-height: 90vh; border-radius: 16px 16px 0 0;
+      padding: 16px; padding-bottom: calc(var(--sab) + 20px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
+      animation: slideUp 0.25s ease-out;
+    }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+    .modal-header { display: flex; justify-content: space-between; align-items: center; }
+    .modal-title { font-size: 1.1rem; font-weight: 700; }
+    .close-btn { background: #2c2c2e; border: none; color: white; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; }
+
+    .album-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+    .album-photo { position: relative; aspect-ratio: 1; cursor: pointer; }
+    .album-photo img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+    .photo-delete {
+      position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.7); color: white;
+      border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 0.7rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; z-index: 10;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label { font-size: 0.8rem; color: var(--text-sub); }
+
+    .danger-zone { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+    .btn-danger { background: var(--accent-danger); width: 100%; }
+
+    /* スライドショーモーダル */
+    .slideshow-modal {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.95); display: none; flex-direction: column;
+      justify-content: space-between; align-items: center; z-index: 2000;
+      backdrop-filter: blur(8px);
+      padding: calc(var(--sat) + 10px) 15px calc(var(--sab) + 15px);
+    }
+    .slideshow-modal.active { display: flex; }
+    
+    .slideshow-header {
+      width: 100%; display: flex; justify-content: space-between; align-items: center;
+      gap: 8px; background: rgba(30, 30, 30, 0.8); padding: 8px 12px; border-radius: 12px; z-index: 2001;
+    }
+    .slideshow-controls { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+    .slideshow-controls select, .slideshow-controls button {
+      background: #333; color: #fff; border: 1px solid #555; padding: 6px 10px; border-radius: 6px; font-size: 12px;
+    }
+    
+    .slideshow-body {
+      flex: 1; width: 100%; display: flex; justify-content: center; align-items: center;
+      position: relative; overflow: hidden;
+    }
+    .slideshow-body img {
+      max-width: 95%; max-height: 80vh; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+      object-fit: contain; user-select: none;
+    }
+    .slideshow-footer { font-size: 13px; color: var(--text-sub); }
+  </style>
+</head>
+<body>
+
+  <!-- トップコントロール -->
+  <div class="header-controls">
+    <select id="board-select" onchange="switchBoard()"></select>
+    <button onclick="createNewBoard()">+ 新規Tier表</button>
+  </div>
+
+  <!-- タブナビゲーション -->
+  <div class="nav-tabs">
+    <div class="nav-tab active" onclick="switchView('board')">Tier表</div>
+    <div class="nav-tab" onclick="switchView('compare')">同Tier順位付け</div>
+    <div class="nav-tab" onclick="switchView('settings')">カスタマイズ</div>
+    <div class="nav-tab" onclick="switchView('backup')">バックアップ</div>
+  </div>
+
+  <!-- 1. Tier表メイン表示 -->
+  <div id="view-board" class="view-section active">
+    <!-- アイテム個別登録 -->
+    <div class="add-form">
+      <div style="font-size: 0.85rem; font-weight: bold; color: var(--text-sub);">アイテム個別登録</div>
+      <div class="form-row">
+        <label class="file-label" id="file-label" for="file-input">メイン画像</label>
+        <input type="file" id="file-input" accept="image/*" onchange="previewMainImage(this)">
+        <input type="text" id="item-title-input" placeholder="タイトル (例: 来来亭)">
+      </div>
+      <div class="form-row">
+        <select id="target-tier-select" style="flex:1;"></select>
+        <button onclick="addItem()" style="padding: 10px 20px;">追加</button>
+      </div>
+    </div>
+
+    <!-- 画像一括登録（一括追加機能） -->
+    <div class="add-form">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 0.85rem; font-weight: bold; color: var(--text-sub);">画像を一括追加（未割り当てへ登録）</div>
+        <label class="file-label" style="background: var(--accent); color: white; padding: 6px 12px; font-size: 0.8rem;">
+          + 複数画像を選択
+          <input type="file" id="batch-file-input" accept="image/*" multiple onchange="batchAddItems(this)">
+        </label>
+      </div>
+    </div>
+
+    <!-- Tierボード本体 -->
+    <div class="tier-board" id="tier-board-container"></div>
+  </div>
+
+  <!-- 2. 同Tier内のランキング比較表示 -->
+  <div id="view-compare" class="view-section">
+    <div class="add-form" style="margin-bottom: 8px;">
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span style="font-size: 0.85rem; color: var(--text-sub); white-space: nowrap;">対象Tier:</span>
+        <select id="compare-tier-select" onchange="nextPair()" style="flex: 1;"></select>
+      </div>
+    </div>
+
+    <div class="compare-container">
+      <div style="font-size:0.85rem; color:var(--text-sub);">同じTier内での上位を選択（タップ）</div>
+      <div class="compare-box">
+        <div class="card-choice" onclick="vote(0)">
+          <img id="img-a" src="" alt="" style="display:none;">
+          <span class="item-title" id="name-a">-</span>
+        </div>
+        <div style="align-self: center; font-weight: bold; color: var(--text-sub);">VS</div>
+        <div class="card-choice" onclick="vote(1)">
+          <img id="img-b" src="" alt="" style="display:none;">
+          <span class="item-title" id="name-b">-</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Tierカスタマイズ表示 -->
+  <div id="view-settings" class="view-section">
+    <div class="settings-card">
+      <div style="font-size: 0.9rem; font-weight: bold; margin-bottom: 8px;">Tier区分・名称の設定</div>
+      <div id="tier-configs-list"></div>
+      <button onclick="addTierConfig()" class="btn-sec" style="width: 100%; margin-top: 8px;">+ Tierを追加</button>
+    </div>
+  </div>
+
+  <!-- 4. バックアップ & エクスポート表示 -->
+  <div id="view-backup" class="view-section">
+    <div class="settings-card">
+      <div style="font-size: 0.9rem; font-weight: bold;">バックアップ（一括保存）</div>
+      <div style="font-size: 0.8rem; color: var(--text-sub); line-height: 1.4;">
+        現在アプリ内に保存されているすべてのTier表、アイテム、および関連画像アルバムを一括でファイル形式（.json）として保存・復元します。
+      </div>
+      <button onclick="exportAllData()" class="btn-success" style="padding: 12px; margin-top: 8px;">
+        データをファイルに書き出す (エクスポート)
+      </button>
+    </div>
+
+    <div class="settings-card">
+      <div style="font-size: 0.9rem; font-weight: bold;">復元（インポート）</div>
+      <div style="font-size: 0.8rem; color: var(--text-sub); line-height: 1.4;">
+        保存したバックアップファイル（.json）を選択して読み込みます。
+      </div>
+      <label class="file-label" style="background: var(--accent); color: white; padding: 12px; margin-top: 8px;">
+        バックアップファイルを選択 (インポート)
+        <input type="file" id="backup-file-input" accept=".json" onchange="importAllData(this)">
+      </label>
+    </div>
+  </div>
+
+  <!-- モーダル：アイテム詳細 & 画像アルバム -->
+  <div class="modal-overlay" id="album-modal" onclick="closeModalOnOverlay(event)">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">アイテム詳細</div>
+        <button class="close-btn" onclick="closeModal()">閉じる</button>
+      </div>
+
+      <!-- タイトル編集 -->
+      <div class="form-group">
+        <label>タイトル</label>
+        <input type="text" id="modal-item-title-input" onchange="updateItemTitle()" placeholder="タイトルを入力">
+      </div>
+
+      <!-- 所属Tier -->
+      <div class="form-group">
+        <label>所属Tier</label>
+        <select id="modal-tier-select" onchange="updateItemTier()"></select>
+      </div>
+
+      <!-- 画像アルバムセクション -->
+      <div style="border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div style="font-weight: bold; font-size: 0.9rem;">関連画像アルバム</div>
+          <label class="file-label" style="padding: 6px 12px; font-size: 0.8rem; background: var(--accent);">
+            + 画像を一括追加
+            <input type="file" id="album-file-input" accept="image/*" multiple onchange="uploadAlbumPhotos(this)">
+          </label>
+        </div>
+        <div class="album-grid" id="album-photos-grid"></div>
+      </div>
+
+      <div class="danger-zone">
+        <button class="btn-danger" onclick="deleteCurrentItem()">このアイテムを削除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- スライドショー機能付きモーダル -->
+  <div class="slideshow-modal" id="slideshow-modal">
+    <div class="slideshow-header">
+      <div class="slideshow-controls">
+        <button id="autoPlayBtn" onclick="toggleAutoPlay()">再生</button>
+        <select id="intervalSelect" onchange="changeInterval()">
+          <option value="2000">2秒</option>
+          <option value="3000" selected>3秒</option>
+          <option value="5000">5秒</option>
+          <option value="10000">10秒</option>
+          <option value="15000">15秒</option>
+        </select>
+        <button id="modeBtn" onclick="toggleMode()">順序: 順番</button>
+      </div>
+      <button class="close-btn" style="background:#ff3b30;" onclick="closeSlideshow()">✕ 閉じる</button>
+    </div>
+
+    <div class="slideshow-body" id="slideshowBody">
+      <img id="slideshowImg" src="" alt="拡大画像">
+    </div>
+
+    <div class="slideshow-footer">
+      <span id="slideshowCounter">1 / 1</span>
+    </div>
+  </div>
+
+  <script>
+    // PWA ServiceWorker 登録
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+
+    // デフォルトTier定義 (S〜G + 未割り当て)
+    const defaultTierConfigs = [
+      { id: "S", name: "S", color: "#ff7f7f" },
+      { id: "A", name: "A", color: "#ffbf7f" },
+      { id: "B", name: "B", color: "#ffff7f" },
+      { id: "C", name: "C", color: "#7fff7f" },
+      { id: "D", name: "D", color: "#7fbfff" },
+      { id: "E", name: "E", color: "#bf7fff" },
+      { id: "F", name: "F", color: "#ff7fbf" },
+      { id: "G", name: "G", color: "#aaaaaa" },
+      { id: "UNASSIGNED", name: "未配置", color: "#444444" }
+    ];
+
+    let currentBoardId = "board_default";
+    let tierConfigs = [];
+    let items = [];
+    let selectedMainImageBase64 = "";
+    let activeModalItemId = null;
+    let currentPair = [null, null];
+
+    // スライドショー制御用
+    let slideshowImages = [];
+    let currentSlideIndex = 0;
+    let isAutoPlaying = false;
+    let autoPlayTimer = null;
+    let isRandom = false;
+
+    // --- IndexedDB ---
+    const dbName = "CustomTierAppDB";
+    let db;
+    const request = indexedDB.open(dbName, 2);
+    request.onupgradeneeded = (e) => {
+      db = e.target.result;
+      if (!db.objectStoreNames.contains("boards")) {
+        db.createObjectStore("boards", { keyPath: "id" });
+      }
+    };
+    request.onsuccess = (e) => {
+      db = e.target.result;
+      loadBoardList();
+    };
+
+    // --- 画像の圧縮リサイズ (最大600px) ---
+    function compressImage(file, maxSize = 600, quality = 0.8) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let w = img.width, h = img.height;
+            if (w > h) {
+              if (w > maxSize) { h *= maxSize / w; w = maxSize; }
+            } else {
+              if (h > maxSize) { w *= maxSize / h; h = maxSize; }
+            }
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // --- メイン画像のプレビュー ---
+    async function previewMainImage(input) {
+      if (input.files && input.files[0]) {
+        selectedMainImageBase64 = await compressImage(input.files[0], 300, 0.8);
+        document.getElementById("file-label").textContent = "選択済み";
+        document.getElementById("file-label").style.background = "#28a745";
+      }
+    }
+
+    // --- ビュー切り替え ---
+    function switchView(viewName) {
+      document.querySelectorAll(".view-section").forEach(el => el.classList.remove("active"));
+      document.querySelectorAll(".nav-tab").forEach(el => el.classList.remove("active"));
+      
+      document.getElementById("view-" + viewName).classList.add("active");
+      const tabIdx = viewName === 'board' ? 0 : viewName === 'compare' ? 1 : viewName === 'settings' ? 2 : 3;
+      document.querySelectorAll(".nav-tab")[tabIdx].classList.add("active");
+
+      if (viewName === 'compare') {
+        populateCompareTierSelect();
+        nextPair();
+      } else if (viewName === 'settings') {
+        renderTierSettings();
+      }
+    }
+
+    // --- ボード作成・読み込み ---
+    function createNewBoard() {
+      const name = prompt("新しいTier表の名前を入力してください:");
+      if (!name) return;
+      const id = "board_" + Date.now();
+
+      const newBoard = {
+        id,
+        name,
+        tierConfigs: JSON.parse(JSON.stringify(defaultTierConfigs)),
+        items: []
+      };
+
+      const tx = db.transaction("boards", "readwrite");
+      tx.objectStore("boards").put(newBoard);
+      tx.oncomplete = () => {
+        currentBoardId = id;
+        loadBoardList();
+      };
+    }
+
+    function loadBoardList() {
+      const select = document.getElementById("board-select");
+      select.innerHTML = "";
+      const tx = db.transaction("boards", "readonly");
+      const store = tx.objectStore("boards");
+
+      let boards = [];
+      store.openCursor().onsuccess = (e) => {
+        let cursor = e.target.result;
+        if (cursor) {
+          boards.push(cursor.value);
+          cursor.continue();
+        } else {
+          if (boards.length === 0) {
+            createNewBoard();
+          } else {
+            boards.forEach(b => {
+              const opt = document.createElement("option");
+              opt.value = b.id; opt.textContent = b.name;
+              select.appendChild(opt);
+            });
+            if (!boards.some(b => b.id === currentBoardId)) currentBoardId = boards[0].id;
+            select.value = currentBoardId;
+            loadCurrentBoard();
+          }
+        }
+      };
+    }
+
+    function switchBoard() {
+      currentBoardId = document.getElementById("board-select").value;
+      loadCurrentBoard();
+    }
+
+    function loadCurrentBoard() {
+      const tx = db.transaction("boards", "readonly");
+      tx.objectStore("boards").get(currentBoardId).onsuccess = (e) => {
+        const board = e.target.result;
+        if (board) {
+          tierConfigs = board.tierConfigs || JSON.parse(JSON.stringify(defaultTierConfigs));
+          // 未配置Tierのバックポート保証
+          if (!tierConfigs.some(tc => tc.id === "UNASSIGNED")) {
+            tierConfigs.push({ id: "UNASSIGNED", name: "未配置", color: "#444444" });
+          }
+          items = board.items || [];
+          updateTargetTierSelect();
+          renderBoard();
+        }
+      };
+    }
+
+    function saveCurrentBoard() {
+      const tx = db.transaction("boards", "readwrite");
+      tx.objectStore("boards").get(currentBoardId).onsuccess = (e) => {
+        const board = e.target.result || { id: currentBoardId, name: "Tier表" };
+        board.tierConfigs = tierConfigs;
+        board.items = items;
+        tx.objectStore("boards").put(board);
+      };
+    }
+
+    // --- Tierドロップダウン更新 ---
+    function updateTargetTierSelect() {
+      const select = document.getElementById("target-tier-select");
+      select.innerHTML = "";
+      tierConfigs.forEach(tc => {
+        const opt = document.createElement("option");
+        opt.value = tc.id; opt.textContent = tc.name + " Tier";
+        select.appendChild(opt);
+      });
+    }
+
+    // --- アイテム個別追加 ---
+    function addItem() {
+      const titleInput = document.getElementById("item-title-input");
+      const title = titleInput.value.trim();
+      const targetTier = document.getElementById("target-tier-select").value;
+
+      if (!title) { alert("タイトルを入力してください"); return; }
+
+      const newItem = {
+        id: "item_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
+        name: title,
+        img: selectedMainImageBase64,
+        tierId: targetTier,
+        score: 1500,
+        album: []
+      };
+
+      items.push(newItem);
+      saveCurrentBoard();
+
+      titleInput.value = "";
+      selectedMainImageBase64 = "";
+      document.getElementById("file-input").value = "";
+      document.getElementById("file-label").textContent = "メイン画像";
+      document.getElementById("file-label").style.background = "#2c2c2e";
+
+      renderBoard();
+    }
+
+    // --- 画像一括追加機能 ---
+    async function batchAddItems(input) {
+      if (!input.files || input.files.length === 0) return;
+      const files = Array.from(input.files);
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const base64 = await compressImage(file, 400, 0.8);
+        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+
+        const newItem = {
+          id: "item_" + Date.now() + "_" + i + "_" + Math.floor(Math.random() * 1000),
+          name: nameWithoutExt,
+          img: base64,
+          tierId: "UNASSIGNED",
+          score: 1500,
+          album: []
+        };
+        items.push(newItem);
+      }
+
+      saveCurrentBoard();
+      renderBoard();
+      input.value = "";
+    }
+
+    // --- 画面描画 & ドラッグ＆ドロップ (SortableJS) ---
+    function renderBoard() {
+      const container = document.getElementById("tier-board-container");
+      container.innerHTML = "";
+
+      tierConfigs.forEach(tc => {
+        const row = document.createElement("div");
+        row.className = "tier-row";
+
+        const label = document.createElement("div");
+        label.className = "tier-label";
+        label.style.backgroundColor = tc.color;
+        label.textContent = tc.name;
+
+        const itemsArea = document.createElement("div");
+        itemsArea.className = "tier-items";
+        itemsArea.dataset.tierId = tc.id;
+
+        const filteredItems = items.filter(i => i.tierId === tc.id).sort((a,b) => b.score - a.score);
+
+        filteredItems.forEach(item => {
+          const card = document.createElement("div");
+          card.className = "item-card";
+          card.dataset.itemId = item.id;
+
+          // 短いタップで詳細モーダル、長押しでドラッグ移動
+          let touchStartTime = 0;
+          card.addEventListener('touchstart', () => { touchStartTime = Date.now(); }, { passive: true });
+          card.addEventListener('touchend', () => {
+            if (Date.now() - touchStartTime < 200) {
+              openItemModal(item.id);
+            }
+          });
+          card.onclick = () => {
+            if (!('ontouchstart' in window)) openItemModal(item.id);
+          };
+
+          if (item.img) {
+            const img = document.createElement("img");
+            img.src = item.img;
+            card.appendChild(img);
+          }
+
+          const title = document.createElement("div");
+          title.className = "title";
+          title.textContent = item.name;
+          card.appendChild(title);
+
+          if (item.album && item.album.length > 0) {
+            const badge = document.createElement("div");
+            badge.className = "album-badge";
+            badge.textContent = item.album.length;
+            card.appendChild(badge);
+          }
+
+          itemsArea.appendChild(card);
+        });
+
+        row.appendChild(label);
+        row.appendChild(itemsArea);
+        container.appendChild(row);
+
+        // Tier間のドラッグ＆ドロップ初期化
+        new Sortable(itemsArea, {
+          group: 'tier-items',
+          animation: 150,
+          delay: 100,
+          delayOnTouchOnly: true,
+          touchStartThreshold: 5,
+          onEnd: function (evt) {
+            const itemId = evt.item.dataset.itemId;
+            const newTierId = evt.to.dataset.tierId;
+            const targetItem = items.find(i => i.id === itemId);
+            if (targetItem) {
+              targetItem.tierId = newTierId;
+              saveCurrentBoard();
+            }
+          }
+        });
+      });
+    }
+
+    // --- モーダル & アルバム管理 ---
+    function openItemModal(itemId) {
+      activeModalItemId = itemId;
+      const item = items.find(i => i.id === itemId);
+      if (!item) return;
+
+      document.getElementById("modal-item-title-input").value = item.name;
+
+      const tierSelect = document.getElementById("modal-tier-select");
+      tierSelect.innerHTML = "";
+      tierConfigs.forEach(tc => {
+        const opt = document.createElement("option");
+        opt.value = tc.id; opt.textContent = tc.name + " Tier";
+        if (tc.id === item.tierId) opt.selected = true;
+        tierSelect.appendChild(opt);
+      });
+
+      renderAlbumPhotos(item);
+      document.getElementById("album-modal").classList.add("active");
+    }
+
+    function closeModal() {
+      document.getElementById("album-modal").classList.remove("active");
+      activeModalItemId = null;
+    }
+
+    function closeModalOnOverlay(e) {
+      if (e.target.id === "album-modal") closeModal();
+    }
+
+    function updateItemTitle() {
+      if (!activeModalItemId) return;
+      const newTitle = document.getElementById("modal-item-title-input").value.trim();
+      if (!newTitle) return;
+      const item = items.find(i => i.id === activeModalItemId);
+      if (item) {
+        item.name = newTitle;
+        saveCurrentBoard();
+        renderBoard();
+      }
+    }
+
+    function updateItemTier() {
+      if (!activeModalItemId) return;
+      const item = items.find(i => i.id === activeModalItemId);
+      if (item) {
+        item.tierId = document.getElementById("modal-tier-select").value;
+        saveCurrentBoard();
+        renderBoard();
+      }
+    }
+
+    async function uploadAlbumPhotos(input) {
+      if (!activeModalItemId || !input.files) return;
+      const item = items.find(i => i.id === activeModalItemId);
+      if (!item) return;
+
+      if (!item.album) item.album = [];
+
+      const files = Array.from(input.files);
+      for (let file of files) {
+        const base64 = await compressImage(file, 800, 0.8);
+        item.album.push(base64);
+      }
+
+      saveCurrentBoard();
+      renderAlbumPhotos(item);
+      renderBoard();
+      input.value = "";
+    }
+
+    function renderAlbumPhotos(item) {
+      const grid = document.getElementById("album-photos-grid");
+      grid.innerHTML = "";
+
+      // アルバム閲覧時のスライドショー配列構築（メイン画像 + アルバム画像）
+      let modalImageList = [];
+      if (item.img) modalImageList.push(item.img);
+      if (item.album && item.album.length > 0) modalImageList.push(...item.album);
+
+      if (modalImageList.length === 0) {
+        grid.innerHTML = '<div style="grid-column: 1/-1; font-size:0.8rem; color:var(--text-sub); text-align:center; padding:12px;">画像がありません</div>';
+        return;
+      }
+
+      // アルバム画像グリッド描画
+      (item.album || []).forEach((photo, idx) => {
+        const wrap = document.createElement("div");
+        wrap.className = "album-photo";
+        wrap.onclick = () => openSlideshow(modalImageList, item.img ? idx + 1 : idx);
+
+        const img = document.createElement("img");
+        img.src = photo;
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "photo-delete";
+        delBtn.textContent = "✕";
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deletePhoto(idx);
+        };
+
+        wrap.appendChild(img);
+        wrap.appendChild(delBtn);
+        grid.appendChild(wrap);
+      });
+    }
+
+    function deletePhoto(idx) {
+      if (!activeModalItemId) return;
+      const item = items.find(i => i.id === activeModalItemId);
+      if (item && item.album) {
+        item.album.splice(idx, 1);
+        saveCurrentBoard();
+        renderAlbumPhotos(item);
+        renderBoard();
+      }
+    }
+
+    function deleteCurrentItem() {
+      if (!activeModalItemId) return;
+      if (confirm("このアイテムを削除しますか？")) {
+        items = items.filter(i => i.id !== activeModalItemId);
+        saveCurrentBoard();
+        closeModal();
+        renderBoard();
+      }
+    }
+
+    // --- スライドショー＆画像拡大機能 ---
+    function openSlideshow(imageList, startIndex = 0) {
+      if (!imageList || imageList.length === 0) return;
+      slideshowImages = imageList;
+      currentSlideIndex = startIndex;
+      updateSlideDisplay();
+      document.getElementById("slideshow-modal").classList.add("active");
+    }
+
+    function closeSlideshow() {
+      document.getElementById("slideshow-modal").classList.remove("active");
+      stopAutoPlay();
+    }
+
+    function updateSlideDisplay() {
+      document.getElementById("slideshowImg").src = slideshowImages[currentSlideIndex];
+      document.getElementById("slideshowCounter").textContent = `${currentSlideIndex + 1} / ${slideshowImages.length}`;
+    }
+
+    function nextSlide() {
+      if (slideshowImages.length === 0) return;
+      if (isRandom) {
+        let nextIndex;
+        do {
+          nextIndex = Math.floor(Math.random() * slideshowImages.length);
+        } while (slideshowImages.length > 1 && nextIndex === currentSlideIndex);
+        currentSlideIndex = nextIndex;
+      } else {
+        currentSlideIndex = (currentSlideIndex + 1) % slideshowImages.length;
+      }
+      updateSlideDisplay();
+    }
+
+    function prevSlide() {
+      if (slideshowImages.length === 0) return;
+      if (isRandom) {
+        nextSlide();
+      } else {
+        currentSlideIndex = (currentSlideIndex - 1 + slideshowImages.length) % slideshowImages.length;
+      }
+      updateSlideDisplay();
+    }
+
+    function toggleAutoPlay() {
+      const btn = document.getElementById("autoPlayBtn");
+      if (isAutoPlaying) {
+        stopAutoPlay();
+      } else {
+        isAutoPlaying = true;
+        btn.textContent = "停止";
+        btn.style.backgroundColor = "#ff9500";
+        startAutoPlayTimer();
+      }
+    }
+
+    function startAutoPlayTimer() {
+      if (autoPlayTimer) clearInterval(autoPlayTimer);
+      const interval = parseInt(document.getElementById("intervalSelect").value, 10);
+      autoPlayTimer = setInterval(() => { nextSlide(); }, interval);
+    }
+
+    function stopAutoPlay() {
+      isAutoPlaying = false;
+      if (autoPlayTimer) clearInterval(autoPlayTimer);
+      const btn = document.getElementById("autoPlayBtn");
+      btn.textContent = "再生";
+      btn.style.backgroundColor = "#333";
+    }
+
+    function changeInterval() {
+      if (isAutoPlaying) startAutoPlayTimer();
+    }
+
+    function toggleMode() {
+      isRandom = !isRandom;
+      document.getElementById("modeBtn").textContent = isRandom ? "順序: ランダム" : "順序: 順番";
+    }
+
+    // スライドショーの左右スワイプ操作
+    const slideshowBody = document.getElementById("slideshowBody");
+    let touchStartX = 0, touchEndX = 0;
+    slideshowBody.addEventListener('touchstart', (e) => { touchStartX = e.changedTouches[0].screenX; }, { passive: true });
+    slideshowBody.addEventListener('touchend', (e) => {
+      touchEndX = e.changedTouches[0].screenX;
+      if (touchEndX < touchStartX - 50) nextSlide();
+      if (touchEndX > touchStartX + 50) prevSlide();
+    }, { passive: true });
+
+    // --- 同Tier内比較ランキング (Elo) ---
+    function populateCompareTierSelect() {
+      const select = document.getElementById("compare-tier-select");
+      select.innerHTML = "";
+      tierConfigs.forEach(tc => {
+        const opt = document.createElement("option");
+        opt.value = tc.id; opt.textContent = tc.name + " Tier";
+        select.appendChild(opt);
+      });
+    }
+
+    function nextPair() {
+      const selectedTier = document.getElementById("compare-tier-select").value;
+      const tierItems = items.filter(i => i.tierId === selectedTier);
+
+      if (tierItems.length < 2) {
+        document.getElementById("name-a").textContent = "アイテム不足";
+        document.getElementById("img-a").style.display = "none";
+        document.getElementById("name-b").textContent = "アイテム不足";
+        document.getElementById("img-b").style.display = "none";
+        currentPair = [null, null];
+        return;
+      }
+
+      const idxA = Math.floor(Math.random() * tierItems.length);
+      let idxB = Math.floor(Math.random() * tierItems.length);
+      while (idxA === idxB) idxB = Math.floor(Math.random() * tierItems.length);
+
+      currentPair = [tierItems[idxA], tierItems[idxB]];
+
+      document.getElementById("name-a").textContent = currentPair[0].name;
+      const imgA = document.getElementById("img-a");
+      if (currentPair[0].img) { imgA.src = currentPair[0].img; imgA.style.display = "block"; }
+      else { imgA.style.display = "none"; }
+
+      document.getElementById("name-b").textContent = currentPair[1].name;
+      const imgB = document.getElementById("img-b");
+      if (currentPair[1].img) { imgB.src = currentPair[1].img; imgB.style.display = "block"; }
+      else { imgB.style.display = "none"; }
+    }
+
+    function vote(winnerIndex) {
+      if (!currentPair[0] || !currentPair[1]) return;
+      const winner = currentPair[winnerIndex];
+      const loser = currentPair[1 - winnerIndex];
+
+      const K = 32;
+      const Ea = 1 / (1 + Math.pow(10, (loser.score - winner.score) / 400));
+      winner.score += Math.round(K * (1 - Ea));
+      loser.score -= Math.round(K * (1 - Ea));
+
+      saveCurrentBoard();
+      renderBoard();
+      nextPair();
+    }
+
+    // --- Tierカスタマイズ機能 ---
+    function renderTierSettings() {
+      const container = document.getElementById("tier-configs-list");
+      container.innerHTML = "";
+
+      tierConfigs.forEach((tc, idx) => {
+        const row = document.createElement("div");
+        row.className = "tier-setting-row";
+
+        const colorPicker = document.createElement("input");
+        colorPicker.type = "color";
+        colorPicker.className = "color-picker";
+        colorPicker.value = tc.color;
+        colorPicker.onchange = (e) => { tc.color = e.target.value; saveCurrentBoard(); renderBoard(); };
+
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = tc.name;
+        nameInput.style.flex = "1";
+        nameInput.onchange = (e) => { tc.name = e.target.value; updateTargetTierSelect(); saveCurrentBoard(); renderBoard(); };
+
+        const delBtn = document.createElement("button");
+        delBtn.className = "btn-sec";
+        delBtn.textContent = "削除";
+        delBtn.onclick = () => {
+          if (tierConfigs.length <= 1) { alert("最低1つのTierが必要です"); return; }
+          tierConfigs.splice(idx, 1);
+          saveCurrentBoard();
+          renderTierSettings();
+          updateTargetTierSelect();
+          renderBoard();
+        };
+
+        row.appendChild(colorPicker);
+        row.appendChild(nameInput);
+        row.appendChild(delBtn);
+        container.appendChild(row);
+      });
+    }
+
+    function addTierConfig() {
+      const newId = "tier_" + Date.now();
+      tierConfigs.push({ id: newId, name: "新規", color: "#888888" });
+      saveCurrentBoard();
+      renderTierSettings();
+      updateTargetTierSelect();
+      renderBoard();
+    }
+
+    // --- バックアップ＆エクスポート機能 ---
+    function exportAllData() {
+      const tx = db.transaction("boards", "readonly");
+      const store = tx.objectStore("boards");
+      let allBoards = [];
+
+      store.openCursor().onsuccess = (e) => {
+        let cursor = e.target.result;
+        if (cursor) {
+          allBoards.push(cursor.value);
+          cursor.continue();
+        } else {
+          const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allBoards, null, 2));
+          const downloadAnchor = document.createElement('a');
+          const fileName = `tier_backup_${new Date().toISOString().slice(0, 10)}.json`;
+          
+          downloadAnchor.setAttribute("href", dataStr);
+          downloadAnchor.setAttribute("download", fileName);
+          document.body.appendChild(downloadAnchor);
+          downloadAnchor.click();
+          downloadAnchor.remove();
+        }
+      };
+    }
+
+    function importAllData(input) {
+      if (!input.files || !input.files[0]) return;
+      const file = input.files[0];
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        try {
+          const importedBoards = JSON.parse(e.target.result);
+          if (!Array.isArray(importedBoards)) {
+            alert("無効なバックアップファイル形式です");
+            return;
+          }
+
+          if (confirm("現在のデータを上書きして復元しますか？")) {
+            const tx = db.transaction("boards", "readwrite");
+            const store = tx.objectStore("boards");
+            
+            store.clear().onsuccess = () => {
+              importedBoards.forEach(b => store.put(b));
+              tx.oncomplete = () => {
+                alert("データの復元が完了しました");
+                loadBoardList();
+                switchView('board');
+              };
+            };
+          }
+        } catch (err) {
+          alert("ファイルの読み込みに失敗しました");
+        }
+      };
+      reader.readAsText(file);
+      input.value = "";
+    }
+  </script>
+</body>
+</html>
